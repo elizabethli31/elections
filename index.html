@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<!--
+  index.html: p3 html
+  Copyright (C)  2023 University of Chicago. All rights reserved.
+
+  This is only for students and instructors in the 2023 CMSC 23900 ("DataVis") class, for use in
+  that class. It is not licensed for open-source or any other kind of re-distribution. Do not allow
+  this file to be copied or downloaded by anyone outside the 2023 DataVis class.
+  -->
+
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
+  <title>DataVis'23 p3</title>
+  <style>
+    body {
+      background-color: #111;
+      color: #eee;
+      /* i.e., non-SVG text color */
+    }
+
+    svg text {
+      fill: #eee;
+      /* SVG text color */
+    }
+
+    /* created with help from https://grid.layoutit.com/ */
+    #grid-container {
+      display: grid;
+      grid-template-columns: 3fr 2fr;
+      grid-template-rows: 2fr 7fr 1fr;
+      gap: 0px 0px;
+      grid-template-areas:
+        'bal bal'
+        /* these names only matter for the "grid-area" properties below */
+        'map scat'
+        'time mode';
+      align-items: center;
+      justify-items: center;
+    }
+
+    #cell-balance {
+      grid-area: bal;
+      /* make this div always fill out the containing cell */
+      width: 100%;
+      height: 100%;
+    }
+
+    #cell-us-map {
+      grid-area: map;
+    }
+
+    #cell-scatter {
+      grid-area: scat;
+    }
+
+    #cell-timeline {
+      grid-area: time;
+    }
+
+    #cell-mode {
+      grid-area: mode;
+    }
+
+    /* end of specifying the CSS grid layout */
+    .stateHex {
+      /* the per-state hexagons */
+      stroke-width: 0;
+    }
+
+    .stateHexOutline {
+      /* the outline of the per-state hexagons */
+      stroke-width: 0;
+    }
+
+    .stateID {
+      /* the state abbreviations inside each hex */
+      font-size: 12px;
+      font-family: sans-serif;
+      /* https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/text-anchor */
+      text-anchor: middle;
+      /* https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/dominant-baseline */
+      dominant-baseline: middle;
+      /* https://developer.mozilla.org/en-US/docs/Web/CSS/text-shadow */
+      text-shadow: -1px -1px 3px #000, 0px -1px 3px #000, 1px -1px 3px #000, -1px 0px 3px #000,
+        1px 0px 3px #000, -1px 1px 3px #000, 0px 1px 3px #000, 1px 1px 3px #000;
+      /* so that mouseovers respond to state hexs, but not the abbreviation text */
+      pointer-events: none;
+      opacity: 0.85;
+    }
+
+    .stateScat {
+      /* the per-state marks inside the scatterplot */
+      stroke: white;
+      stroke-opacity stroke-width: 1.3;
+      fill: black;
+      fill-opacity: 0.1;
+    }
+
+    #cell-balance text,
+    /* text in the balance bars, */
+    #scat-axes text,
+    /* and identifying X and Y axes of the scatterplot, */
+    #mode-form,
+    /* and the radiobutton labels underneath it, */
+    #timeline-label
+
+    /* and label showing the year on the timeline */
+      {
+      font-size: 16px;
+      font-family: sans-serif;
+      text-anchor: middle;
+    }
+
+    #cell-balance text {
+      font-size: 18px;
+      dominant-baseline: middle;
+    }
+
+    #y-axis {
+      dominant-baseline: text-bottom;
+    }
+
+    #x-axis {
+      dominant-baseline: hanging;
+    }
+
+    #scat-canvas {
+      outline: #888 solid 1px;
+    }
+
+    .bad-cksum {
+      color: #d55;
+    }
+
+    .hide {
+      /* things with this class aren't shown; "display: none" also hides things, but then things
+        like clientWidth can't be computed from non-displayed elements, and currently
+        p3.balanceInit depends on that. */
+      visibility: hidden;
+    }
+
+    /* any further static styling you want, including over-riding rules above (later rules
+      over-ride earlier rules with the same specificity). The reference code sets up all the
+      tooltip styling here. */
+    /* v.v.v.v.v.v.v.v.v.v.v.v.v.v.v  begin student code (index.html styling) */
+    /* ^'^'^'^'^'^'^'^'^'^'^'^'^'^'^  end student code (17L in ref) */
+  </style>
+</head>
+
+<body>
+  <!-- with the class=hide, the whole visualization starts off as hidden. It will be displayed
+    when everything is loaded; thanks to addEventListener('load' ... -->
+  <div id="thevis" class="hide">
+    <!-- Unfortunately, the way this sets ids for every single element, and the way those ids are
+      named, is pretty clunky, and hinders other re-use. -->
+    <div id="grid-container">
+      <div id="cell-balance"><!-- svg #balance will be in here --></div>
+      <div id="cell-us-map"><svg id="us-map"></svg></div>
+      <div id="cell-scatter" style="position: relative">
+        <!-- h/t http://stackoverflow.com/questions/24041111/can-i-place-a-svg-image-element-on-top-a-canvas-element -->
+        <div>
+          <canvas id="scat-canvas"></canvas>
+        </div>
+        <svg id="scat-axes" style="position: absolute;">
+          <text id="y-axis">#y-axis</text>
+          <text id="x-axis">#x-axis</text>
+        </svg>
+        <svg id="scat-marks-container" style="position: absolute;">
+          <g id="scat-marks"></g>
+        </svg>
+      </div>
+      <div id="cell-timeline">
+        <form id="timeline-form">
+          <!-- https://bl.ocks.org/d3noob/2cb9427ae371eee76804945146b066b3 -->
+          <label id="timeline-label" for="timeline" style="text-align: right">
+            Election Year <span id="year">????</span>
+          </label>
+          <input type="range" min="0" max="0" id="timeline" name="year" style="width: 30em" />
+        </form>
+      </div>
+      <div id="cell-mode">
+        <form id="mode-form" name="mode-form"></form>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { d3, parm, glob } from './common.js';
+    import * as hex from './hexmap.js';
+    import * as p3 from './p3.js';
+
+    /* display the visualization once the page is finished loading
+    https://developer.mozilla.org/en-US/docs/Web/Events */
+    window.addEventListener('load', () => d3.select('#thevis').classed('hide', false));
+
+    hex.mapResize('us-map', parm.hexWidth); // size SVG containing US map, from single hex size
+    /* make vote bars; has to follow making US map so that grid cell sizes are finalized */
+    p3.balanceInit('cell-balance', 'balance');
+    p3.canvasInit('scat-canvas'); // initialize the canvas that displays the colormap
+    p3.scatLabelPos('scan-canvas'); // create the scatterplot (axis labels, and position over canvas)
+    // to respond to key presses; currently typing 'd' toggles display of state abbreviations
+    function keydownDo(evt) {
+      // https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event
+      // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent
+      let logAllKeys = false;
+      // you can say "logAllKeys = true;" below to enable the verbose keystroke logging below
+      // v.v.v.v.v.v.v.v.v.v.v.v.v.v.v  begin student code (reset logAllKeys)
+      // ^'^'^'^'^'^'^'^'^'^'^'^'^'^'^  end student code (1L in ref)
+      switch (evt.key) {
+        case 'd':
+          glob.currentAbbrHide = !glob.currentAbbrHide;
+          d3.selectAll('.stateID').classed('hide', glob.currentAbbrHide);
+          break;
+        // any other key presses you want to respond to for debugging purposes?
+        // v.v.v.v.v.v.v.v.v.v.v.v.v.v.v  begin student code (keydownDo cases)
+        // ^'^'^'^'^'^'^'^'^'^'^'^'^'^'^  end student code (0L in ref)
+        default:
+          if (logAllKeys) {
+            console.log(`another key: ${evt.shiftKey ? 'shift ' : ''}|${evt.key}|`);
+          }
+          break;
+      }
+    }
+    /* read in all the data files, storing results in glob.csvData, and use Promise.all to wait
+    until all the (asynchronous) reads are finished, then synthesize results.
+    votes.csv: popular and Electoral College vote counts for D,R parties and many years
+    stateNames.csv: full "state" names for all two-letter state abbreviations
+    hexRC.csv: coordinates of each state in a hexagonal map of US, styled after
+    https://blog.apps.npr.org/2015/05/11/hex-tile-maps.html
+    candidateNames.csv: names of D,R presidential candidates over many years */
+    Promise.all(
+      ['votes', 'hexRC', 'candidateNames', 'stateNames'].map((fn) =>
+        d3.csv(`./data/${fn}.csv`).then((data) => (glob.csvData[fn] = data))
+      )
+    ).then(() => {
+      // create hexmap of all states
+      hex.mapFill(
+        'us-map',
+        glob.csvData.hexRC.map((d) =>
+          hex.gen(parm.hexWidth, parm.hexScale, d.StateAbbr, +d.row, +d.col)
+        )
+      );
+      /* initialize scatterplot marks; nothing about the data values is actually used; only the
+      number of "states" contributing to the Electoral College (51), so ok to use unprocessed
+      voting data array */
+      p3.scatMarksInit('scat-marks', glob.csvData.votes);
+      /* These next two functions (dataProc and visInit) are things that you finish. First,
+      process glob.csvData to set up whatever data arrays you'll supply to d3 */
+      p3.dataProc(glob);
+      // then, do any final initializations before interactions start
+      p3.visInit(glob);
+      // set up timeline and mode "form"s (HTML-speak for interactive elements of a UI)
+      p3.formsInit('timeline', 'year', glob.years, 'mode-form');
+
+      const initialYear = glob.years.slice(-1); // last year
+      const initialMode = 'RVD';
+      let initialShowData = false;
+      /* as given, UI starts with a display of the DOM element id (starting with "#"), to help
+      clarify how different parts of the UI are identified (so that your code can modify them).
+      You can say "initialShowData = true;" here to make it so that UI starts with some
+      display of the data (for year 2020, with red-vs-blue coloring) */
+      // v.v.v.v.v.v.v.v.v.v.v.v.v.v.v  begin student code (initialShowData reset)
+      initialShowData = true;
+      // ^'^'^'^'^'^'^'^'^'^'^'^'^'^'^  end student code (1L in ref)
+      if (initialShowData) {
+        /* simulate selecting last year on the timeline (two steps) */
+        document.getElementById('timeline-form').year.value = initialYear;
+        document.getElementById('timeline').click();
+        /* simulate clicking on one of the mode radio buttons (one step) */
+        document.getElementById(initialMode).click();
+      }
+      // add keyboard even listener, so that 'd' toggles state abbreviations
+      document.addEventListener('keydown', keydownDo);
+    });
+    // initialize window.hack global; you can add more things here, or in p3.js
+    window.hack = {
+      d3,
+      // v.v.v.v.v.v.v.v.v.v.v.v.v.v.v  begin student code (more in window.hack)
+      parm, glob,
+      // ^'^'^'^'^'^'^'^'^'^'^'^'^'^'^  end student code (0L in ref)
+    }
+
+  
+  </script>
+</body>
